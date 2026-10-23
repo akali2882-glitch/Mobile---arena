@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Mobile Arena</title>
+
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #101522;
+      font-family: Arial, sans-serif;
+      touch-action: none;
+    }
+
+    #game {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+
+    #hud {
+      position: fixed;
+      top: 14px;
+      left: 12px;
+      color: white;
+      background: #111a2bdd;
+      border: 1px solid #6c8cff;
+      padding: 10px 14px;
+      border-radius: 12px;
+      z-index: 5;
+    }
+
+    #health {
+      width: 150px;
+      height: 9px;
+      background: #333;
+      border-radius: 8px;
+      margin-top: 7px;
+      overflow: hidden;
+    }
+
+    #healthFill {
+      height: 100%;
+      width: 100%;
+      background: #36e69a;
+      transition: width .2s;
+    }
+
+    #attack {
+      position: fixed;
+      bottom: 30px;
+      right: 25px;
+      width: 85px;
+      height: 85px;
+      border-radius: 50%;
+      border: 3px solid #8cbbff;
+      background: radial-gradient(#397dff, #182c76);
+      color: white;
+      font-size: 17px;
+      font-weight: bold;
+      z-index: 10;
+      box-shadow: 0 0 20px #397dff88;
+    }
+
+    #dash {
+      position: fixed;
+      bottom: 40px;
+      right: 125px;
+      width: 62px;
+      height: 62px;
+      border-radius: 50%;
+      border: 2px solid #cf9aff;
+      background: #702acb;
+      color: white;
+      z-index: 10;
+    }
+
+    #help {
+      position: fixed;
+      bottom: 12px;
+      left: 12px;
+      color: white;
+      font-size: 12px;
+      background: #111a2bdd;
+      padding: 8px;
+      border-radius: 8px;
+      z-index: 5;
+    }
+
+    #message {
+      position: fixed;
+      top: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #fff;
+      font-size: 16px;
+      font-weight: bold;
+      text-shadow: 0 2px 6px #000;
+      z-index: 5;
+      pointer-events: none;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud">
+    <strong>⚔️ MOBILE ARENA</strong>
+    <div>قهرمان: آذرخش</div>
+    <div id="health">
+      <div id="healthFill"></div>
+    </div>
+    <div id="stats">هدف: 100 HP | ضربه: 0</div>
+  </div>
+
+  <div id="message">برای حرکت، روی زمین لمس کن</div>
+
+  <button id="dash">یورش</button>
+  <button id="attack">⚔ حمله</button>
+
+  <div id="help">لمس زمین: حرکت | حمله: ضربه | یورش: حرکت سریع</div>
+
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+
+  <script>
+  (() => {
+    const canvas = document.getElementById("game");
+    const engine = new BABYLON.Engine(canvas, true, {
+      preserveDrawingBuffer: false,
+      stencil: true,
+      antialias: true
+    });
+
+    let scene, hero, target, camera;
+    let targetHP = 100;
+    let hits = 0;
+    let destination = null;
+    let dashTime = 0;
+    let attackCooldown = 0;
+    let effects = [];
+
+    function createScene() {
+      scene = new BABYLON.Scene(engine);
+      scene.clearColor = new BABYLON.Color4(0.035, 0.055, 0.10, 1);
+
+      camera = new BABYLON.ArcRotateCamera(
+        "camera",
+        -Math.PI / 2,
+        1.02,
+        13,
+        new BABYLON.Vector3(0, 0, 0),
+        scene
+      );
+
+      camera.lowerRadiusLimit = 9;
+      camera.upperRadiusLimit = 16;
+      camera.lowerBetaLimit = 0.65;
+      camera.upperBetaLimit = 1.25;
+      camera.panningSensibility = 0;
+      camera.attachControl(canvas, true);
+
+      const hemi = new BABYLON.HemisphericLight(
+        "hemi",
+        new BABYLON.Vector3(0, 1, 0),
+        scene
+      );
+      hemi.intensity = 0.9;
+
+      const light = new BABYLON.PointLight(
+        "blueLight",
+        new BABYLON.Vector3(0, 5, 0),
+        scene
+      );
+      light.diffuse = new BABYLON.Color3(0.25, 0.45, 1);
+      light.intensity = 25;
+
+      const ground = BABYLON.MeshBuilder.CreateGround(
+        "ground",
+        { width: 40, height: 40, subdivisions: 2 },
+        scene
+      );
+
+      const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+      groundMat.diffuseColor = new BABYLON.Color3(0.12, 0.17, 0.19);
+      groundMat.specularColor = new BABYLON.Color3(0.15, 0.18, 0.25);
+      ground.material = groundMat;
+
+      // خطوط میدان
+      const gridMat = new BABYLON.StandardMaterial("gridMat", scene);
+      gridMat.diffuseColor = new BABYLON.Color3(0.12, 0.28, 0.38);
+      gridMat.emissiveColor = new BABYLON.Color3(0.025, 0.09, 0.14);
+
+      for (let i = -18; i <= 18; i += 3) {
+        const line1 = BABYLON.MeshBuilder.CreateBox(
+          "gridX" + i,
+          { width: 0.035, height: 0.025, depth: 38 },
+          scene
+        );
+        line1.position.set(i, 0.02, 0);
+        line1.material = gridMat;
+
+        const line2 = BABYLON.MeshBuilder.CreateBox(
+          "gridZ" + i,
+          { width: 38, height: 0.025, depth: 0.035 },
+          scene
+        );
+        line2.position.set(0, 0.02, i);
+        line2.material = gridMat;
+      }
+
+      // کریستال‌های تزئینی
+      const crystalMat = new BABYLON.StandardMaterial("crystalMat", scene);
+      crystalMat.diffuseColor = new BABYLON.Color3(0.22, 0.18, 0.75);
+      crystalMat.emissiveColor = new BABYLON.Color3(0.15, 0.08, 0.65);
+
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4;
+        const crystal = BABYLON.MeshBuilder.CreatePolyhedron(
+          "crystal" + i,
+          { type: 1, size: 0.65 },
+          scene
+        );
+        crystal.position.set(
+          Math.cos(a) * 7,
+          0.7,
+          Math.sin(a) * 7
+        );
+        crystal.scaling.y = 1.7;
+        crystal.material = crystalMat;
+      }
+
+      // قهرمان
+      hero = new BABYLON.TransformNode("hero", scene);
+      hero.position.set(0, 0, 0);
+
+      const armorMat = new BABYLON.StandardMaterial("armor", scene);
+      armorMat.diffuseColor = new BABYLON.Color3(0.08, 0.17, 0.40);
+      armorMat.emissiveColor = new BABYLON.Color3(0.02, 0.06, 0.18);
+
+      const glowMat = new BABYLON.StandardMaterial("glow", scene);
+      glowMat.diffuseColor = new BABYLON.Color3(0.1, 0.55, 1);
+      glowMat.emissiveColor = new BABYLON.Color3(0.05, 0.35, 1);
+
+      const body = BABYLON.MeshBuilder.CreateCapsule(
+        "heroBody",
+        { height: 1.45, radius: 0.38 },
+        scene
+      );
+      body.parent = hero;
+      body.position.y = 0.85;
+      body.material = armorMat;
+
+      const head = BABYLON.MeshBuilder.CreateSphere(
+        "heroHead",
+        { diameter: 0.55, segments: 12 },
+        scene
+      );
+      head.parent = hero;
+      head.position.y = 1.72;
+      head.material = glowMat;
+
+      // شمشیر
+      const sword = BABYLON.MeshBuilder.CreateBox(
+        "sword",
+        { width: 0.14, height: 1.15, depth: 0.22 },
+        scene
+      );
+      sword.parent = hero;
+      sword.position.set(0.53, 0.95, 0.18);
+      sword.rotation.z = -0.45;
+      sword.material = glowMat;
+
+      const ring = BABYLON.MeshBuilder.CreateTorus(
+        "heroRing",
+        { diameter: 1.25, thickness: 0.06, tessellation: 32 },
+        scene
+      );
+      ring.parent = hero;
+      ring.position.y = 0.08;
+      ring.rotation.x = Math.PI / 2;
+      ring.material = glowMat;
+
+      // هدف تمرینی
+      target = new BABYLON.TransformNode("target", scene);
+      target.position.set(3, 0, 0);
+
+      const targetMat = new BABYLON.StandardMaterial("targetMat", scene);
+      targetMat.diffuseColor = new BABYLON.Color3(0.45, 0.13, 0.12);
+      targetMat.emissiveColor = new BABYLON.Color3(0.18, 0.025, 0.015);
+
+      const targetBody = BABYLON.MeshBuilder.CreateBox(
+        "targetBody",
+        { width: 0.95, height: 1.5, depth: 0.7 },
+        scene
+      );
+      targetBody.parent = target;
+      targetBody.position.y = 0.8;
+      targetBody.material = targetMat;
+
+      const targetHead = BABYLON.MeshBuilder.CreateSphere(
+        "targetHead",
+        { diameter: 0.55, segments: 12 },
+        scene
+      );
+      targetHead.parent = target;
+      targetHead.position.y = 1.85;
+      targetHead.material = targetMat;
+
+      const targetCore = BABYLON.MeshBuilder.CreateSphere(
+        "targetCore",
+        { diameter: 0.3 },
+        scene
+      );
+      targetCore.parent = target;
+      targetCore.position.y = 1.2;
+      targetCore.material = glowMat;
+
+      camera.target = hero.position;
+
+      return scene;
+    }
+
+    function updateHUD() {
+      document.getElementById("healthFill").style.width =
+        Math.max(0, targetHP) + "%";
+
+      document.getElementById("stats").textContent =
+        "هدف: " + Math.max(0, targetHP) + " HP | ضربه: " + hits;
+    }
+
+    function createEffect(position, color) {
+      const mat = new BABYLON.StandardMaterial("effectMat" + Date.now(), scene);
+      mat.emissiveColor = color;
+      mat.diffuseColor = color;
+
+      const effect = BABYLON.MeshBuilder.CreateSphere(
+        "effect",
+        { diameter: 0.35, segments: 8 },
+        scene
+      );
+      effect.position.copyFrom(position);
+      effect.position.y += 1;
+      effect.material = mat;
+
+      effects.push({ mesh: effect, life: 0.45 });
+    }
+
+    function attack() {
+      if (attackCooldown > 0) return;
+
+      attackCooldown = 0.45;
+
+      const distance = BABYLON.Vector3.Distance(
+        hero.position,
+        target.position
+      );
+
+      if (distance < 3.2 && targetHP > 0) {
+        targetHP = Math.max(0, targetHP - 10);
+        hits++;
+        createEffect(target.position, new BABYLON.Color3(0.2, 0.65, 1));
+
+        target.scaling.set(1.15, 0.85, 1.15);
+
+        setTimeout(() => {
+          if (target && !target.isDisposed()) {
+            target.scaling.set(1, 1, 1);
+          }
+        }, 120);
+
+        if (targetHP === 0) {
+          document.getElementById("message").textContent =
+            "هدف نابود شد! دوباره حمله کن تا تمرین ادامه پیدا کنه.";
+          setTimeout(() => {
+            targetHP = 100;
+            updateHUD();
+            document.getElementById("message").textContent =
+              "هدف دوباره آماده است!";
+          }, 1500);
+        }
+      } else {
+        document.getElementById("message").textContent =
+          "برای حمله به هدف نزدیک‌تر شو!";
+        setTimeout(() => {
+          document.getElementById("message").textContent =
+            "برای حرکت، روی زمین لمس کن";
+        }, 1200);
+      }
+
+      updateHUD();
+    }
+
+    function dash() {
+      const forward = new BABYLON.Vector3(
+        Math.sin(hero.rotation.y),
+        0,
+        Math.cos(hero.rotation.y)
+      );
+
+      destination = hero.position.add(forward.scale(3));
+      dashTime = 0.22;
+    }
+
+    canvas.addEventListener("pointerdown", (event) => {
+      if (event.target !== canvas) return;
+
+      const pick = scene.pick(
+        scene.pointerX,
+        scene.pointerY,
+        mesh => mesh === scene.getMeshByName("ground")
+      );
+
+      if (pick && pick.hit && pick.pickedPoint) {
+        destination = pick.pickedPoint.clone();
+        destination.y = 0;
+      }
+    });
+
+    document.getElementById("attack").addEventListener("pointerdown", e => {
+      e.preventDefault();
+      attack();
+    });
+
+    document.getElementById("dash").addEventListener("pointerdown", e => {
+      e.preventDefault();
+      dash();
+    });
+
+    createScene();
+
+    engine.runRenderLoop(() => {
+      const dt = Math.min(engine.getDeltaTime() / 1000, 0.05);
+
+      if (destination) {
+        const direction = destination.subtract(hero.position);
+        direction.y = 0;
+
+        const distance = direction.length();
+
+        if (distance > 0.12) {
+          direction.normalize();
+
+          const speed = dashTime > 0 ? 15 : 4.2;
+          hero.position.addInPlace(direction.scale(speed * dt));
+
+          hero.rotation.y = Math.atan2(direction.x, direction.z);
+        } else {
+          destination = null;
+        }
+      }
+
+      if (dashTime > 0) dashTime -= dt;
+      if (attackCooldown > 0) attackCooldown -= dt;
+
+      camera.target = BABYLON.Vector3.Lerp(
+        camera.target,
+        hero.position,
+        Math.min(1, dt * 5)
+      );
+
+      hero.position.x = BABYLON.Scalar.Clamp(hero.position.x, -18, 18);
+      hero.position.z = BABYLON.Scalar.Clamp(hero.position.z, -18, 18);
+
+      effects = effects.filter(effect => {
+        effect.life -= dt;
+        effect.mesh.scaling.scaleInPlace(1 + dt * 2);
+
+        if (effect.life <= 0) {
+          effect.mesh.dispose();
+          return false;
+        }
+
+        return true;
+      });
+
+      scene.render();
+    });
+
+    window.addEventListener("resize", () => engine.resize());
+  })();
+  </script>
+</body>
+</html>
